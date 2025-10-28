@@ -1,0 +1,15 @@
+{
+  "editor.insertSpaces": true,
+  "editor.tabSize": 4,
+  "files.exclude": {
+    "out": false,
+    "node_modules": true,
+    ".vscode-test": true
+  },
+  "search.exclude": {
+    "out": true,
+    "node_modules": true,
+    ".vscode-test": true
+  },
+  "typescript.tsdk": "node_modules/typescript/lib"
+}
