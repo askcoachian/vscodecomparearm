@@ -1,0 +1,66 @@
+{
+  "name": "vscodecomparearm",
+  "displayName": "ARM Template Comparator",
+  "version": "1.0.0",
+  "description": "Compare ARM (Azure Resource Manager) Templates with object-by-object comparison",
+  "publisher": "askcoachian",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "armCompare.compareSelected",
+        "title": "ARM: Compare Selected Templates",
+        "category": "ARM Compare"
+      },
+      {
+        "command": "armCompare.compareWithFile",
+        "title": "ARM: Compare with File...",
+        "category": "ARM Compare"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "armCompare.compareWithFile",
+          "when": "resourceExtname == .json",
+          "group": "3_compare"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "echo 'No linting configured'",
+    "test": "node ./out/test/runTest.js"
+  },
+  "keywords": [
+    "arm",
+    "azure",
+    "resource manager",
+    "template",
+    "compare"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.9.1",
+    "@types/vscode": "^1.105.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "glob": "^11.0.3",
+    "mocha": "^11.7.4",
+    "typescript": "^5.9.3"
+  }
+}
