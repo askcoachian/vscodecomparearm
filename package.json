@@ -11,7 +11,7 @@
     "Other"
   ],
   "activationEvents": [],
-  "main": "./out/extension.js",
+  "main": "./out/src/extension.js",
   "contributes": {
     "commands": [
       {
@@ -20,15 +20,15 @@
         "category": "ARM Compare"
       },
       {
-        "command": "armCompare.compareWithFile",
-        "title": "ARM: Compare with File...",
+        "command": "armCompare.visualDiff",
+        "title": "ARM: Compare To Previous",
         "category": "ARM Compare"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "armCompare.compareWithFile",
+          "command": "armCompare.visualDiff",
           "when": "resourceExtname == .json",
           "group": "3_compare"
         }

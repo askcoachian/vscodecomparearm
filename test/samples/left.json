@@ -1,0 +1,2108 @@
+{
+  "hint": "previous version of the deployment template",
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "dataFactoryName": {
+      "defaultValue": "ldw-adf-ev2-dev",
+      "type": "string"
+    },
+    "configFilePattern": {
+      "type": "string",
+      "defaultValue": "*.json"
+    },
+    "controlDatabaseSecretName": {
+      "type": "string",
+      "defaultValue": "control-connectionString"
+    },
+    "keyvaultName": {
+      "type": "string",
+      "defaultValue": "ldw-keyvault-ev2-dev"
+    }
+
+  },
+
+  "variables": {
+    "factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('dataFactoryName'))]"
+  },
+
+  "resources": [
+    {
+      "apiVersion": "2018-06-01",
+      "name": "[concat(parameters('dataFactoryName'), '/Daily Load')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "dependsOn": [
+        "[concat(variables('factoryId'), '/pipelines/Data Ingestion Engine')]"
+      ],
+      "properties": {
+        "description": "Daily Load",
+        "activities": [
+          {
+            "name": "Data Ingestion Engine",
+            "type": "ExecutePipeline",
+            "dependsOn": [
+              {
+                "activity": "Initiate Build",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "pipeline": {
+                "referenceName": "Data Ingestion Engine",
+                "type": "PipelineReference"
+              },
+              "waitOnCompletion": true,
+              "parameters": {
+                "configFilePattern": {
+                  "value": "@pipeline().parameters.configFilePattern",
+                  "type": "Expression"
+                },
+                "LoadDate": {
+                  "value": "@pipeline().parameters.LoadDate",
+                  "type": "Expression"
+                },
+                "LoadSet": {
+                  "value": "@pipeline().parameters.LoadSet",
+                  "type": "Expression"
+                },
+                "KeyVaultName": {
+                  "value": "@pipeline().parameters.KeyVaultName",
+                  "type": "Expression"
+                },
+                "AdditionalInformation": {
+                  "value": "@if(equals(pipeline().parameters.AdditionalInformation,'Default'),\nconcat('Trigger Name: \"', pipeline().TriggerName,'\"; Trigger Type: \"',pipeline().TriggerType,'\"; PipelineName/s: \"',pipeline().Pipeline,'\"'),\nconcat(pipeline().parameters.AdditionalInformation,' -> \"',pipeline().Pipeline, '\"'))",
+                  "type": "Expression"
+                }
+              }
+            }
+          },
+          {
+            "name": "Initiate Build",
+            "description": "Execute this stored procedure to initiate the Build.",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "Start Pipeline Log",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": "ctrl.uspInitiateLoad",
+              "storedProcedureParameters": {
+                "LoadDateStr": {
+                  "value": {
+                    "value": "@pipeline().parameters.LoadDate",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "LoadSet": {
+                  "value": {
+                    "value": "@pipeline().parameters.LoadSet",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "Load LDW",
+            "description": "Execute the Stored Procedure to build the Lakeside Data Warehouse (LDW).",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "Data Ingestion Engine",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": "ctrl.uspLoadLDW",
+              "storedProcedureParameters": {
+                "LoadDate": {
+                  "value": {
+                    "value": "@pipeline().parameters.LoadDate",
+                    "type": "Expression"
+                  },
+                  "type": "DateTime"
+                },
+                "LoadSet": {
+                  "value": {
+                    "value": "@pipeline().parameters.LoadSet",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "Start Pipeline Log",
+            "description": "Start Daily Load ",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": {
+                "value": "ctrl.uspLog",
+                "type": "Expression"
+              },
+              "storedProcedureParameters": {
+                "IsError": {
+                  "value": "false",
+                  "type": "Boolean"
+                },
+                "IsWarning": {
+                  "value": "false",
+                  "type": "Boolean"
+                },
+                "Message": {
+                  "value": "Start",
+                  "type": "String"
+                },
+                "MessageLevel": {
+                  "value": "1",
+                  "type": "Int32"
+                },
+                "ObjectAffected": {
+                  "value": {
+                    "value": "@pipeline().Pipeline",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "AdditionalInformation": {
+                  "value": {
+                    "value": "@concat(if(equals(pipeline().parameters.AdditionalInformation,'Default'),\nconcat('Trigger Name: \"', pipeline().TriggerName,'\"; Trigger Type: \"',pipeline().TriggerType,'\"; PipelineName/s: \"',pipeline().Pipeline,'\"'),\nconcat(pipeline().parameters.AdditionalInformation,' -> \"',pipeline().Pipeline, '\"')),';')",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "Send Email if not reached",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "End Pipeline Log",
+                "dependencyConditions": [
+                  "Failed",
+                  "Skipped"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": "ctrl.uspSendMail",
+              "storedProcedureParameters": {
+                "Subject": {
+                  "value": {
+                    "value": "@concat('Unexpected Failure on Pipeline: ', pipeline().Pipeline, ' on Load Set: ', pipeline().parameters.LoadSet)",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "HTMLBody": {
+                  "value": {
+                    "value": "@concat('<p>Unexpected Failure on Load Set: ',pipeline().parameters.LoadSet,'</p>')",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "End Pipeline Log",
+            "description": "Start Daily Load ",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "If Data Export",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": {
+                "value": "ctrl.uspLog",
+                "type": "Expression"
+              },
+              "storedProcedureParameters": {
+                "IsError": {
+                  "value": "false",
+                  "type": "Boolean"
+                },
+                "IsWarning": {
+                  "value": "false",
+                  "type": "Boolean"
+                },
+                "Message": {
+                  "value": "End",
+                  "type": "String"
+                },
+                "MessageLevel": {
+                  "value": "1",
+                  "type": "Int32"
+                },
+                "ObjectAffected": {
+                  "value": {
+                    "value": "@pipeline().Pipeline",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "AdditionalInformation": {
+                  "value": {
+                    "value": "@concat(if(equals(pipeline().parameters.AdditionalInformation,'Default'),\nconcat('Trigger Name: \"', pipeline().TriggerName,'\"; Trigger Type: \"',pipeline().TriggerType,'\"; PipelineName/s: \"',pipeline().Pipeline,'\"'),\nconcat(pipeline().parameters.AdditionalInformation,' -> \"',pipeline().Pipeline, '\"')),';')",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "If Data Export",
+            "type": "IfCondition",
+            "dependsOn": [
+              {
+                "activity": "Load LDW",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              },
+              {
+                "activity": "Export Active",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "userProperties": [],
+            "typeProperties": {
+              "expression": {
+                "value": "@and(bool(activity('Export Active').output.firstRow.Export_Active),\nnot(empty(pipeline().parameters.ExportConfigFilePattern)))",
+                "type": "Expression"
+              },
+              "ifTrueActivities": [
+                {
+                  "name": "Data Export Engine",
+                  "type": "ExecutePipeline",
+                  "dependsOn": [],
+                  "policy": {
+                    "secureInput": false
+                  },
+                  "userProperties": [],
+                  "typeProperties": {
+                    "pipeline": {
+                      "referenceName": "Data Export Engine",
+                      "type": "PipelineReference"
+                    },
+                    "waitOnCompletion": true,
+                    "parameters": {
+                      "ExportConfigFilePattern": {
+                        "value": "@pipeline().parameters.ExportConfigFilePattern",
+                        "type": "Expression"
+                      },
+                      "LoadDate": {
+                        "value": "@pipeline().parameters.LoadDate",
+                        "type": "Expression"
+                      },
+                      "LoadSet": {
+                        "value": "@pipeline().parameters.LoadSet",
+                        "type": "Expression"
+                      },
+                      "KeyVaultName": {
+                        "value": "@pipeline().parameters.KeyVaultName",
+                        "type": "Expression"
+                      },
+                      "AdditionalInformation": {
+                        "value": "@if(equals(pipeline().parameters.AdditionalInformation,'Default'),\nconcat('Trigger Name: \"', pipeline().TriggerName,'\"; Trigger Type: \"',pipeline().TriggerType,'\"; PipelineName/s: \"',pipeline().Pipeline,'\"'),\nconcat(pipeline().parameters.AdditionalInformation,' -> \"',pipeline().Pipeline, '\"'))",
+                        "type": "Expression"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "Export Active",
+            "type": "Lookup",
+            "dependsOn": [
+              {
+                "activity": "Initiate Build",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "0.12:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "source": {
+                "type": "AzureSqlSource",
+                "sqlReaderStoredProcedureName": "ctrl.usp_Export_Active",
+                "storedProcedureParameters": {
+                  "LoadSet": {
+                    "type": "String",
+                    "value": {
+                      "value": "@pipeline().parameters.LoadSet",
+                      "type": "Expression"
+                    }
+                  }
+                },
+                "queryTimeout": "02:00:00",
+                "partitionOption": "None"
+              },
+              "dataset": {
+                "referenceName": "SourceAzureSqlTable",
+                "type": "DatasetReference",
+                "parameters": {
+                  "connectionSecret": "control-connectionString",
+                  "tableName": "dummy",
+                  "schemaName": "dummy"
+                }
+              }
+            }
+          },
+          {
+            "name": "Set LoadSet",
+            "type": "SetVariable",
+            "dependsOn": [],
+            "policy": {
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "variableName": "Annotation",
+              "value": {
+                "value": "@pipeline().parameters.LoadSet",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "parameters": {
+          "configFilePattern": {
+            "type": "string",
+            "defaultValue": "*.json"
+          },
+          "LoadDate": {
+            "type": "string",
+            "defaultValue": "31 DEC 2099"
+          },
+          "LoadSet": {
+            "type": "string",
+            "defaultValue": "Daily Load"
+          },
+          "KeyVaultName": {
+            "type": "string",
+            "defaultValue": "[parameters('keyvaultName')]"
+          },
+          "AdditionalInformation": {
+            "type": "string",
+            "defaultValue": "Default"
+          },
+          "ExportConfigFilePattern": {
+            "type": "string"
+          }
+        },
+        "variables": {
+          "Annotation": {
+            "type": "String"
+          }
+        },
+        "annotations": [
+          "@pipeline().parameters.LoadSet"
+        ],
+        "lastPublishTime": "2024-07-22T05:00:41Z"
+      }
+    },
+    {
+      "apiVersion": "2018-06-01",
+      "dependsOn": [],
+      "name": "[concat(parameters('dataFactoryName'), '/Data Ingestion Engine')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "properties": {
+        "description": "Data Ingestion Engine",
+        "activities": [
+          {
+            "name": "Copy Source Files",
+            "type": "ExecutePipeline",
+            "dependsOn": [
+              {
+                "activity": "Execute Custom Prep Pipeline",
+                "dependencyConditions": [
+                  "Completed"
+                ]
+              }
+            ],
+            "policy": {
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "pipeline": {
+                "referenceName": "Copy Source Files to DataLake",
+                "type": "PipelineReference"
+              },
+              "waitOnCompletion": true,
+              "parameters": {
+                "configFilePattern": {
+                  "value": "@pipeline().parameters.configFilePattern",
+                  "type": "Expression"
+                },
+                "LoadSet": {
+                  "value": "@pipeline().parameters.LoadSet",
+                  "type": "Expression"
+                },
+                "KeyVaultName": {
+                  "value": "@pipeline().parameters.KeyVaultName",
+                  "type": "Expression"
+                },
+                "AdditionalInformation": {
+                  "value": "@if(equals(pipeline().parameters.AdditionalInformation,'Default'),\nconcat('Trigger Name: \"', pipeline().TriggerName,'\"; Trigger Type: \"',pipeline().TriggerType,'\"; PipelineName/s: \"',pipeline().Pipeline,'\"'),\nconcat(pipeline().parameters.AdditionalInformation,' -> \"',pipeline().Pipeline, '\"'))",
+                  "type": "Expression"
+                }
+              }
+            }
+          },
+          {
+            "name": "Start Data Ingestion Engine Log",
+            "description": "Start Data Ingestion Engine",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": {
+                "value": "ctrl.uspLog",
+                "type": "Expression"
+              },
+              "storedProcedureParameters": {
+                "IsError": {
+                  "value": "false",
+                  "type": "Boolean"
+                },
+                "IsWarning": {
+                  "value": "false",
+                  "type": "Boolean"
+                },
+                "Message": {
+                  "value": {
+                    "value": "@concat('Start of Data Ingestion Engine: ',\npipeline().parameters.LoadSet,', ',\npipeline().parameters.configFilePattern)",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "MessageLevel": {
+                  "value": "1",
+                  "type": "Int32"
+                },
+                "ObjectAffected": {
+                  "value": {
+                    "value": "Data Ingestion Engine",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "AdditionalInformation": {
+                  "value": {
+                    "value": "@concat(if(equals(pipeline().parameters.AdditionalInformation,'Default'),\nconcat('Trigger Name: \"', pipeline().TriggerName,'\"; Trigger Type: \"',pipeline().TriggerType,'\"; PipelineName/s: \"',pipeline().Pipeline,'\"'),\nconcat(pipeline().parameters.AdditionalInformation,' -> \"',pipeline().Pipeline, '\"')),';')",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "Send Email if not reached",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "End Data Ingestion Engine Log",
+                "dependencyConditions": [
+                  "Failed",
+                  "Skipped"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": "ctrl.uspSendMail",
+              "storedProcedureParameters": {
+                "Subject": {
+                  "value": "LDW Failure",
+                  "type": "String"
+                },
+                "HTMLBody": {
+                  "value": {
+                    "value": "@concat('<p>Unexpected Date Ingestion Engine Failure</p>','<p>LoadSet: ', pipeline().parameters.LoadSet, '</p>','<p>See information in ctrl.DwLog.','</p>')",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "End Data Ingestion Engine Log",
+            "description": "End Data Ingestion Engine",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "DQA",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": {
+                "value": "ctrl.uspLog",
+                "type": "Expression"
+              },
+              "storedProcedureParameters": {
+                "IsError": {
+                  "value": "false",
+                  "type": "Boolean"
+                },
+                "IsWarning": {
+                  "value": "false",
+                  "type": "Boolean"
+                },
+                "Message": {
+                  "value": {
+                    "value": "End of Data Ingestion Engine",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "MessageLevel": {
+                  "value": "1",
+                  "type": "Int32"
+                },
+                "ObjectAffected": {
+                  "value": {
+                    "value": "Data Ingestion Engine",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "AdditionalInformation": {
+                  "value": {
+                    "value": "@concat(if(equals(pipeline().parameters.AdditionalInformation,'Default'),\nconcat('Trigger Name: \"', pipeline().TriggerName,'\"; Trigger Type: \"',pipeline().TriggerType,'\"; PipelineName/s: \"',pipeline().Pipeline,'\"'),\nconcat(pipeline().parameters.AdditionalInformation,' -> \"',pipeline().Pipeline, '\"')),';')",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "DQA",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "Copy Source Files",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": "ctrl.dqa_Post_Data_Ingestion_Engine",
+              "storedProcedureParameters": {
+                "LoadSet": {
+                  "value": {
+                    "value": "@pipeline().parameters.LoadSet",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "configFilePattern": {
+                  "value": {
+                    "value": "@pipeline().parameters.configFilePattern",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "AzureSqlDatabaseLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "connectionSecret": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "Execute Custom Prep Pipeline",
+            "type": "ExecutePipeline",
+            "dependsOn": [
+              {
+                "activity": "Start Data Ingestion Engine Log",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "pipeline": {
+                "referenceName": "Custom ADF Pipelines",
+                "type": "PipelineReference"
+              },
+              "waitOnCompletion": true,
+              "parameters": {
+                "Pipeline": {
+                  "value": "@pipeline().parameters.LoadSet",
+                  "type": "Expression"
+                },
+                "Config": "[[]"
+              }
+            }
+          },
+          {
+            "name": "Set LoadSet",
+            "type": "SetVariable",
+            "dependsOn": [],
+            "policy": {
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "variableName": "Annotation",
+              "value": {
+                "value": "@pipeline().parameters.LoadSet",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "parameters": {
+          "configFilePattern": {
+            "type": "string",
+            "defaultValue": "*.json"
+          },
+          "LoadDate": {
+            "type": "string",
+            "defaultValue": "31 DEC 2099"
+          },
+          "LoadSet": {
+            "type": "string",
+            "defaultValue": "Daily Load"
+          },
+          "KeyVaultName": {
+            "type": "string",
+            "defaultValue": "[parameters('keyvaultName')]"
+          },
+          "AdditionalInformation": {
+            "type": "string",
+            "defaultValue": "Default"
+          }
+        },
+        "variables": {
+          "Annotation": {
+            "type": "String"
+          }
+        },
+        "annotations": [
+          "@pipeline().parameters.LoadSet"
+        ],
+        "lastPublishTime": "2024-07-22T05:00:40Z"
+      }
+    },
+    {
+      "apiVersion": "2018-06-01",
+      "name": "[concat(parameters('dataFactoryName'), '/Reload Security')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "dependsOn": [
+        "[concat(variables('factoryId'), '/pipelines/Data Ingestion Engine')]"
+      ],
+      "properties": {
+        "activities": [
+          {
+            "name": "Data Ingestion Engine - Security Only",
+            "type": "ExecutePipeline",
+            "dependsOn": [
+              {
+                "activity": "Delete Users Cache",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              },
+              {
+                "activity": "Delete Permissions Cache",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "pipeline": {
+                "referenceName": "Data Ingestion Engine",
+                "type": "PipelineReference"
+              },
+              "waitOnCompletion": true,
+              "parameters": {
+                "configFilePattern": "load.security*.json",
+                "LoadDate": "31 DEC 2099",
+                "LoadSet": "SRS Export",
+                "KeyVaultName": {
+                  "value": "@pipeline().parameters.KeyVaultName",
+                  "type": "Expression"
+                },
+                "AdditionalInformation": "Reload Security"
+              }
+            }
+          },
+          {
+            "name": "Set User Permissions",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "Data Ingestion Engine - Security Only",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "policy": {
+              "timeout": "0.12:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "storedProcedureName": "ctrl.uspSetUserPermissions",
+              "storedProcedureParameters": {
+                "SchemaName": {
+                  "value": "Tableau",
+                  "type": "String"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "SQLServerLinkedService",
+              "type": "LinkedServiceReference",
+              "parameters": {
+                "SecretName": "control-connectionString"
+              }
+            }
+          },
+          {
+            "name": "Delete Users Cache",
+            "type": "Delete",
+            "dependsOn": [],
+            "policy": {
+              "timeout": "0.12:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "dataset": {
+                "referenceName": "LDWOneLakeBinaryFile",
+                "type": "DatasetReference",
+                "parameters": {
+                  "FileSystem": "rawlatest",
+                  "Directory": "load/shared/SharePoint/foldername/shared/",
+                  "FileName": "load.security_users.xlsx"
+                }
+              },
+              "enableLogging": false,
+              "storeSettings": {
+                "type": "AzureBlobFSReadSettings",
+                "recursive": false,
+                "enablePartitionDiscovery": false
+              }
+            }
+          },
+          {
+            "name": "Delete Permissions Cache",
+            "type": "Delete",
+            "dependsOn": [],
+            "policy": {
+              "timeout": "0.12:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "dataset": {
+                "referenceName": "LDWOneLakeBinaryFile",
+                "type": "DatasetReference",
+                "parameters": {
+                  "FileSystem": "rawlatest",
+                  "Directory": "load/shared/SharePoint/foldername/shared/",
+                  "FileName": "load.security_permissions.xlsx"
+                }
+              },
+              "enableLogging": false,
+              "storeSettings": {
+                "type": "AzureBlobFSReadSettings",
+                "recursive": false,
+                "enablePartitionDiscovery": false
+              }
+            }
+          }
+        ],
+        "parameters": {
+          "KeyVaultName": {
+            "type": "string",
+            "defaultValue": "[parameters('keyvaultName')]"
+          }
+        },
+        "annotations": [],
+        "lastPublishTime": "2024-07-09T10:19:27Z"
+      }
+    },
+    {
+        "apiVersion": "2018-06-01",
+        "name": "[concat(parameters('dataFactoryName'), '/Daily Load All')]",
+        "type": "Microsoft.DataFactory/factories/pipelines",
+        "dependsOn": [
+            "[concat(variables('factoryId'), '/pipelines/Daily Load')]",
+            "[concat(variables('factoryId'), '/pipelines/Run Pipeline')]"
+        ],
+        "properties": {
+            "activities": [
+                {
+                    "name": "Daily Load",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "Daily Load",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All"
+                        }
+                    }
+                },
+                {
+                    "name": "Govt",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load",
+                            "dependencyConditions": [
+                                "Completed"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "Govt",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All"
+                        }
+                    }
+                },
+                {
+                    "name": "AVETMISS",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Govt",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "AVETMISS_NAT_Collection_File_Export",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true
+                    }
+                },
+                {
+                    "name": "Send Email if not reached",
+                    "type": "SqlServerStoredProcedure",
+                    "dependsOn": [
+                        {
+                            "activity": "AVETMISS",
+                            "dependencyConditions": [
+                                "Failed",
+                                "Skipped"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "timeout": "7.00:00:00",
+                        "retry": 0,
+                        "retryIntervalInSeconds": 30,
+                        "secureOutput": false,
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "storedProcedureName": "ctrl.uspSendMail",
+                        "storedProcedureParameters": {
+                            "Subject": {
+                                "value": {
+                                    "value": "@concat('Unexpected Failure on Pipeline: Export VET NAT Files')",
+                                    "type": "Expression"
+                                },
+                                "type": "String"
+                            },
+                            "HTMLBody": {
+                                "value": {
+                                    "value": "@concat('Unexpected Failure on Pipeline: Export VET NAT Files')",
+                                    "type": "Expression"
+                                },
+                                "type": "String"
+                            }
+                        }
+                    },
+                    "linkedServiceName": {
+                        "referenceName": "AzureSqlDatabaseLinkedService",
+                        "type": "LinkedServiceReference",
+                        "parameters": {
+                            "connectionSecret": "control-connectionString"
+                        }
+                    }
+                },
+                {
+                    "name": "SSP",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Govt",
+                            "dependencyConditions": [
+                                "Completed"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "SSP",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All"
+                        }
+                    }
+                },
+                {
+                    "name": "After Daily Load All",
+                    "type": "SqlServerStoredProcedure",
+                    "dependsOn": [
+                        {
+                            "activity": "CPP",
+                            "dependencyConditions": [
+                                "Completed"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "timeout": "0.12:00:00",
+                        "retry": 0,
+                        "retryIntervalInSeconds": 30,
+                        "secureOutput": false,
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "storedProcedureName": "ctrl.usp_After_Daily_Load_All"
+                    },
+                    "linkedServiceName": {
+                        "referenceName": "AzureSqlDatabaseLinkedService",
+                        "type": "LinkedServiceReference",
+                        "parameters": {
+                            "connectionSecret": "control-connectionString"
+                        }
+                    }
+                },
+                {
+                    "name": "On Production Only",
+                    "type": "IfCondition",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load",
+                            "dependencyConditions": [
+                                "Completed"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "expression": {
+                            "value": "@equals(pipeline().DataFactory,'ldw-adf-ev2-prod')",
+                            "type": "Expression"
+                        },
+                        "ifTrueActivities": [
+                            {
+                                "name": "Trigger Message Summary",
+                                "type": "ExecutePipeline",
+                                "dependsOn": [],
+                                "policy": {
+                                    "secureInput": false
+                                },
+                                "userProperties": [],
+                                "typeProperties": {
+                                    "pipeline": {
+                                        "referenceName": "Run Pipeline",
+                                        "type": "PipelineReference"
+                                    },
+                                    "waitOnCompletion": true,
+                                    "parameters": {
+                                        "subscriptionId": "53a3d913-0a75-4d1a-9c38-a536933dec80",
+                                        "resourceGroupName": "rg-ldw-dev",
+                                        "factoryName": "ldw-adf-ev2-dev",
+                                        "pipelineName": "Send Consolidated LDW Log"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "On Production Only_copy1",
+                    "type": "IfCondition",
+                    "dependsOn": [
+                        {
+                            "activity": "After Daily Load All",
+                            "dependencyConditions": [
+                                "Completed"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "expression": {
+                            "value": "@equals(pipeline().DataFactory,'ldw-adf-ev2-prod')",
+                            "type": "Expression"
+                        },
+                        "ifTrueActivities": [
+                            {
+                                "name": "Trigger Message Summary_copy1",
+                                "type": "ExecutePipeline",
+                                "dependsOn": [],
+                                "policy": {
+                                    "secureInput": false
+                                },
+                                "userProperties": [],
+                                "typeProperties": {
+                                    "pipeline": {
+                                        "referenceName": "Run Pipeline",
+                                        "type": "PipelineReference"
+                                    },
+                                    "waitOnCompletion": true,
+                                    "parameters": {
+                                        "subscriptionId": "53a3d913-0a75-4d1a-9c38-a536933dec80",
+                                        "resourceGroupName": "rg-ldw-dev",
+                                        "factoryName": "ldw-adf-ev2-dev",
+                                        "pipelineName": "Send Consolidated LDW Log"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "CPP",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "SSP",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "CPP",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Set Day of Week",
+                    "type": "SetVariable",
+                    "dependsOn": [
+                        {
+                            "activity": "After Daily Load All",
+                            "dependencyConditions": [
+                                "Completed"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureOutput": false,
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "variableName": "DayOfWeek",
+                        "value": {
+                            "value": "@formatDateTime(addMinutes(addHours(utcNow(), 9), 30), 'dddd')",
+                            "type": "Expression"
+                        }
+                    }
+                },
+                {
+                    "name": "If Saturday",
+                    "type": "IfCondition",
+                    "dependsOn": [
+                        {
+                            "activity": "Set Day of Week",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "expression": {
+                            "value": "@equals(variables('DayOfWeek'), 'Saturday')",
+                            "type": "Expression"
+                        },
+                        "ifTrueActivities": [
+                            {
+                                "name": "DQA Check View Definitions With Tables",
+                                "type": "SqlServerStoredProcedure",
+                                "dependsOn": [],
+                                "policy": {
+                                    "timeout": "0.12:00:00",
+                                    "retry": 0,
+                                    "retryIntervalInSeconds": 30,
+                                    "secureOutput": false,
+                                    "secureInput": false
+                                },
+                                "userProperties": [],
+                                "typeProperties": {
+                                    "storedProcedureName": "ctrl.usp_DQA_Check_View_Definitions_With_Tables"
+                                },
+                                "linkedServiceName": {
+                                    "referenceName": "AzureSqlDatabaseLinkedService",
+                                    "type": "LinkedServiceReference",
+                                    "parameters": {
+                                        "connectionSecret": "control-connectionString"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ],
+            "parameters": {
+                "KeyVaultName": {
+                    "type": "string",
+                    "defaultValue": "[parameters('keyvaultName')]"
+                }
+            },
+            "variables": {
+                "DayOfWeek": {
+                    "type": "String"
+                }
+            },
+            "annotations": [],
+            "lastPublishTime": "2025-07-23T10:19:02Z"
+        }
+    },
+    {
+        "apiVersion": "2018-06-01",
+        "name": "[concat(parameters('dataFactoryName'), '/Daily Load All Plus')]",
+        "type": "Microsoft.DataFactory/factories/pipelines",
+        "dependsOn": [
+            "[concat(variables('factoryId'), '/pipelines/Daily Load')]",
+            "[concat(variables('factoryId'), '/pipelines/Run Pipeline')]"
+        ],
+        "properties": {
+            "activities": [
+                {
+                    "name": "Daily Load",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Wait 15 minutes",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "Daily Load",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Govt",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "Govt",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "AVETMISS",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Govt",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "AVETMISS_NAT_Collection_File_Export",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true
+                    }
+                },
+                {
+                    "name": "SSP",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Govt",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "SSP",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "After Daily Load All",
+                    "type": "SqlServerStoredProcedure",
+                    "dependsOn": [
+                        {
+                            "activity": "AVETMISS",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        },
+                        {
+                            "activity": "Daily Load Studylink",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        },
+                        {
+                            "activity": "Daily Load SRS",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        },
+                        {
+                            "activity": "CPP",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "timeout": "0.12:00:00",
+                        "retry": 0,
+                        "retryIntervalInSeconds": 30,
+                        "secureOutput": false,
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "storedProcedureName": "ctrl.usp_After_Daily_Load_All"
+                    },
+                    "linkedServiceName": {
+                        "referenceName": "AzureSqlDatabaseLinkedService",
+                        "type": "LinkedServiceReference",
+                        "parameters": {
+                            "connectionSecret": "control-connectionString"
+                        }
+                    }
+                },
+                {
+                    "name": "On Production Only",
+                    "type": "IfCondition",
+                    "dependsOn": [
+                        {
+                            "activity": "After Daily Load All",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "expression": {
+                            "value": "@equals(pipeline().DataFactory,'ldw-adf-ev2-prod')",
+                            "type": "Expression"
+                        },
+                        "ifTrueActivities": [
+                            {
+                                "name": "Trigger Message Summary",
+                                "type": "ExecutePipeline",
+                                "dependsOn": [],
+                                "policy": {
+                                    "secureInput": false
+                                },
+                                "userProperties": [],
+                                "typeProperties": {
+                                    "pipeline": {
+                                        "referenceName": "Run Pipeline",
+                                        "type": "PipelineReference"
+                                    },
+                                    "waitOnCompletion": true,
+                                    "parameters": {
+                                        "subscriptionId": "53a3d913-0a75-4d1a-9c38-a536933dec80",
+                                        "resourceGroupName": "rg-ldw-dev",
+                                        "factoryName": "ldw-adf-ev2-dev",
+                                        "pipelineName": "Send Consolidated LDW Log"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "name": "Daily Load SRS Export",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "SRS Export",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Daily Load SRS",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load SRS Early Load",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        },
+                        {
+                            "activity": "Wait 5 Minutes_copy2",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "SRS",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Daily Load SATAC",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Wait 40 minutes",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "load.load_satac_wildcard*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "SATAC",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Daily Load Studylink",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        },
+                        {
+                            "activity": "Wait 5 Minutes_copy1",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "Studylink",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Daily Load SRS Early Load",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load SRS Export",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "SRS Early Load",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Wait 5 Minutes_copy1",
+                    "type": "Wait",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "waitTimeInSeconds": 300
+                    }
+                },
+                {
+                    "name": "Wait 5 Minutes_copy2",
+                    "type": "Wait",
+                    "dependsOn": [],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "waitTimeInSeconds": 300
+                    }
+                },
+                {
+                    "name": "Daily Load SDX",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "Wait 10 minutes",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "SDX",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Wait 10 minutes",
+                    "type": "Wait",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load SRS Export",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "waitTimeInSeconds": 600
+                    }
+                },
+                {
+                    "name": "Wait 40 minutes",
+                    "type": "Wait",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load SRS Export",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "waitTimeInSeconds": 2400
+                    }
+                },
+                {
+                    "name": "Wait 15 minutes",
+                    "type": "Wait",
+                    "dependsOn": [
+                        {
+                            "activity": "Daily Load SRS Export",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "waitTimeInSeconds": 900
+                    }
+                },
+                {
+                    "name": "CPP",
+                    "type": "ExecutePipeline",
+                    "dependsOn": [
+                        {
+                            "activity": "SSP",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "pipeline": {
+                            "referenceName": "Daily Load",
+                            "type": "PipelineReference"
+                        },
+                        "waitOnCompletion": true,
+                        "parameters": {
+                            "configFilePattern": "*.json",
+                            "LoadDate": "31 DEC 2099",
+                            "LoadSet": "CPP",
+                            "KeyVaultName": {
+                                "value": "@pipeline().parameters.KeyVaultName",
+                                "type": "Expression"
+                            },
+                            "AdditionalInformation": "Rerun All",
+                            "ExportConfigFilePattern": "*.json"
+                        }
+                    }
+                },
+                {
+                    "name": "Set Day of Week",
+                    "type": "SetVariable",
+                    "dependsOn": [
+                        {
+                            "activity": "After Daily Load All",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "policy": {
+                        "secureOutput": false,
+                        "secureInput": false
+                    },
+                    "userProperties": [],
+                    "typeProperties": {
+                        "variableName": "DayOfWeek",
+                        "value": {
+                            "value": "@formatDateTime(addMinutes(addHours(utcNow(), 9), 30), 'dddd')",
+                            "type": "Expression"
+                        }
+                    }
+                },
+                {
+                    "name": "If Saturday",
+                    "type": "IfCondition",
+                    "dependsOn": [
+                        {
+                            "activity": "Set Day of Week",
+                            "dependencyConditions": [
+                                "Succeeded"
+                            ]
+                        }
+                    ],
+                    "userProperties": [],
+                    "typeProperties": {
+                        "expression": {
+                            "value": "@equals(variables('DayOfWeek'), 'Saturday')",
+                            "type": "Expression"
+                        },
+                        "ifTrueActivities": [
+                            {
+                                "name": "DQA Check View Definitions With Tables",
+                                "type": "SqlServerStoredProcedure",
+                                "dependsOn": [],
+                                "policy": {
+                                    "timeout": "0.12:00:00",
+                                    "retry": 0,
+                                    "retryIntervalInSeconds": 30,
+                                    "secureOutput": false,
+                                    "secureInput": false
+                                },
+                                "userProperties": [],
+                                "typeProperties": {
+                                    "storedProcedureName": "ctrl.usp_DQA_Check_View_Definitions_With_Tables"
+                                },
+                                "linkedServiceName": {
+                                    "referenceName": "AzureSqlDatabaseLinkedService",
+                                    "type": "LinkedServiceReference",
+                                    "parameters": {
+                                        "connectionSecret": "control-connectionString"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ],
+            "parameters": {
+                "KeyVaultName": {
+                    "type": "string",
+                    "defaultValue": "[parameters('keyvaultName')]"
+                }
+            },
+            "variables": {
+                "DayOfWeek": {
+                    "type": "String"
+                }
+            },
+            "annotations": [],
+            "lastPublishTime": "2025-07-23T10:19:02Z"
+        }
+    },
+    {
+      "apiVersion": "2018-06-01",
+      "name": "[concat(parameters('dataFactoryName'), '/Run Pipeline')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "properties": {
+        "activities": [
+          {
+            "name": "Run Pipeline",
+            "type": "WebActivity",
+            "dependsOn": [],
+            "policy": {
+              "timeout": "0.12:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "method": "POST",
+              "url": {
+                "value": "@concat('https://management.azure.com/subscriptions/',pipeline().parameters.subscriptionId,'/resourceGroups/',pipeline().parameters.resourceGroupName,'/providers/Microsoft.DataFactory/factories/',pipeline().parameters.factoryName,'/pipelines/',pipeline().parameters.pipelineName,'/createRun?api-version=2018-06-01')",
+                "type": "Expression"
+              },
+              "authentication": {
+                "type": "MSI",
+                "resource": "https://management.azure.com/"
+              }
+            }
+          }
+        ],
+        "parameters": {
+          "subscriptionId": {
+            "type": "string",
+            "defaultValue": "53a3d913-0a75-4d1a-9c38-a536933dec80"
+          },
+          "resourceGroupName": {
+            "type": "string",
+            "defaultValue": "rg-ldw-test"
+          },
+          "factoryName": {
+            "type": "string",
+            "defaultValue": "ldw-adf-ev2-test"
+          },
+          "pipelineName": {
+            "type": "string",
+            "defaultValue": "DoNothing"
+          }
+        },
+        "annotations": [],
+        "lastPublishTime": "2024-11-06T00:11:52Z"
+      }
+    }
+  ]
+}
